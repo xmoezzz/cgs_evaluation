@@ -417,8 +417,8 @@ void StatsTracker::stepInstruction(ExecutionState &es) {
 
       if (currBasicBlock) {
         std::string currFuncName = currBasicBlock->getParent()->getName().str();
-        if ((definedFunctions.find(currFuncName) != definedFunctions.end() &&
-            definedFunctions.at(currFuncName)) &&
+        if ((executor.definedFunctions.find(currFuncName) != executor.definedFunctions.end() &&
+            executor.definedFunctions.at(currFuncName)) &&
             (addedVisitedDefinedLines.find(lineName) ==
                 addedVisitedDefinedLines.end() &&
             visitedDefinedLines.find(lineName) == visitedDefinedLines.end())) {
@@ -437,8 +437,8 @@ void StatsTracker::stepInstruction(ExecutionState &es) {
       }
 
       std::string currFuncName = currBasicBlock->getParent()->getName().str();
-      if ((definedFunctions.find(currFuncName) != definedFunctions.end() &&
-          definedFunctions.at(currFuncName)) &&
+      if ((executor.definedFunctions.find(currFuncName) != executor.definedFunctions.end() &&
+          executor.definedFunctions.at(currFuncName)) &&
           (addedVisitedDefinedBasicBlocks.find(currBasicBlock) ==
               addedVisitedDefinedBasicBlocks.end() &&
           visitedDefinedBasicBlocks.find(currBasicBlock) ==
