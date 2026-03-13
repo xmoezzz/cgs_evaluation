@@ -5644,6 +5644,17 @@ void Executor::dumpStates() {
   ::dumpStates = 0;
 }
 
+void Executor::setSearcherPreModuleInfo(const llvm::Module *mainModule) {
+  for (const auto &F : *mainModule) {
+    std::string funcName = F.getName().str();
+    if (F.isDeclaration() || F.isIntrinsic() || F.empty()) {
+      definedFunctions[funcName] = false;
+    } else {
+      definedFunctions[funcName] = true;
+    }
+  }
+}
+
 ///
 
 Interpreter *Interpreter::create(LLVMContext &ctx, const InterpreterOptions &opts,

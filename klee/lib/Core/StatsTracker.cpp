@@ -101,6 +101,15 @@ cl::opt<unsigned> IStatsWriteAfterInstructions(
         "Write istats after each n instructions, 0 to disable (default=0)"),
     cl::cat(StatsCat));
 
+cl::opt<bool> OutputBCStats("output-bcstats", cl::init(false),
+                            cl::desc("Write basic block/line coverage trace file (default=false)"),
+                            cl::cat(StatsCat));
+
+cl::opt<std::string> BCStatsWriteInterval(
+    "bcstats-write-interval", cl::init("1s"),
+    cl::desc("Approximate time between bcstats writes (default=1s)"),
+    cl::cat(StatsCat));
+
 // XXX I really would like to have dynamic rate control for something like this.
 cl::opt<std::string> UncoveredUpdateInterval(
     "uncovered-update-interval", cl::init("30s"),
@@ -302,6 +311,19 @@ StatsTracker::StatsTracker(Executor &_executor, std::string _objectFilename,
       klee_error("Unable to open instruction level stats file (run.istats).");
     }
   }
+
+  if (OutputBCStats) {
+    bcStatsFile = executor.interpreterHandler->openOutputFile("run.bcstats");
+    if (bcStatsFile) {
+      const time::Span bcStatsWriteInterval(BCStatsWriteInterval);
+      if (bcStatsWriteInterval)
+        executor.timers.add(std::make_unique<Timer>(bcStatsWriteInterval, [&]{
+          writeBCStats();
+        }));
+    } else {
+      klee_error("Unable to open block coverage stats file (run.bcstats).");
+    }
+  }
 }
 
 StatsTracker::~StatsTracker() {  
@@ -322,6 +344,9 @@ void StatsTracker::done() {
   if (statsFile)
     writeStatsLine();
 
+  if (bcStatsFile)
+    writeBCStats();
+
   if (OutputIStats) {
     if (updateMinDistToUncovered)
       computeReachableUncovered();
@@ -331,6 +356,99 @@ void StatsTracker::done() {
 }
 
 void StatsTracker::stepInstruction(ExecutionState &es) {
+  if (OutputBCStats) {
+    auto getDebugInfoOfKInst = [](const klee::KInstIterator &kInstIter,
+                                  std::string &fileName,
+                                  unsigned int &lineNum) -> bool {
+      fileName = "";
+      lineNum = 0;
+
+      if (!kInstIter)
+        return false;
+      if (!kInstIter->info)
+        return false;
+
+      const klee::InstructionInfo &instInfo = *kInstIter->info;
+      fileName = instInfo.file;
+      lineNum = instInfo.line;
+      return true;
+    };
+
+    auto getBasicBlockOfKInst =
+        [](const klee::KInstIterator &kInstIter) -> const llvm::BasicBlock * {
+      if (kInstIter)
+        if (kInstIter->inst)
+          return kInstIter->inst->getParent();
+      return nullptr;
+    };
+
+    auto getBasicBlockName = [](const llvm::BasicBlock *bblock)
+        -> std::pair<std::string, std::size_t> {
+      if (!bblock)
+        return {std::string("null"), 0};
+      const llvm::Function *func = bblock->getParent();
+      std::size_t bblockIndex = 0;
+      for (auto &BB : *func) {
+        if (bblock == &BB)
+          break;
+        ++bblockIndex;
+      }
+      return {func->getName().str(), bblockIndex};
+    };
+
+    bool resFlag = false;
+    std::string fileName;
+    unsigned int lineNum;
+    const llvm::BasicBlock *currBasicBlock = nullptr;
+    std::pair<std::string, std::size_t> bbName;
+
+    resFlag = getDebugInfoOfKInst(es.pc, fileName, lineNum);
+    currBasicBlock = getBasicBlockOfKInst(es.pc);
+    bbName = getBasicBlockName(currBasicBlock);
+
+    if (resFlag) {
+      std::string lineName = fileName + ":" + std::to_string(lineNum);
+
+      if (addedVisitedLines.find(lineName) == addedVisitedLines.end() &&
+          visitedLines.find(lineName) == visitedLines.end()) {
+        addedVisitedLines.emplace(lineName);
+        visitedLines.emplace(lineName);
+      }
+
+      if (currBasicBlock) {
+        std::string currFuncName = currBasicBlock->getParent()->getName().str();
+        if ((definedFunctions.find(currFuncName) != definedFunctions.end() &&
+            definedFunctions.at(currFuncName)) &&
+            (addedVisitedDefinedLines.find(lineName) ==
+                addedVisitedDefinedLines.end() &&
+            visitedDefinedLines.find(lineName) == visitedDefinedLines.end())) {
+          addedVisitedDefinedLines.emplace(lineName);
+          visitedDefinedLines.emplace(lineName);
+        }
+      }
+    }
+
+    if (currBasicBlock) {
+      if (addedVisitedBasicBlocks.find(currBasicBlock) ==
+              addedVisitedBasicBlocks.end() &&
+          visitedBasicBlocks.find(currBasicBlock) == visitedBasicBlocks.end()) {
+        addedVisitedBasicBlocks[currBasicBlock] = bbName;
+        visitedBasicBlocks[currBasicBlock] = bbName;
+      }
+
+      std::string currFuncName = currBasicBlock->getParent()->getName().str();
+      if ((definedFunctions.find(currFuncName) != definedFunctions.end() &&
+          definedFunctions.at(currFuncName)) &&
+          (addedVisitedDefinedBasicBlocks.find(currBasicBlock) ==
+              addedVisitedDefinedBasicBlocks.end() &&
+          visitedDefinedBasicBlocks.find(currBasicBlock) ==
+              visitedDefinedBasicBlocks.end())) {
+        addedVisitedDefinedBasicBlocks[currBasicBlock] = bbName;
+        visitedDefinedBasicBlocks[currBasicBlock] = bbName;
+      }
+    }
+  }
+
   if (OutputIStats) {
     if (TrackInstructionTime) {
       static time::Point lastNowTime(time::getWallTime());
@@ -601,6 +719,49 @@ void StatsTracker::writeStatsLine() {
 
     statsWriteCount = 0;
   }
+}
+
+void StatsTracker::writeBCStats() {
+  llvm::raw_fd_ostream &of = *bcStatsFile;
+
+  time::Span elapsedTime(klee::time::getWallTime() - startWallTime);
+  auto elapsedTimeCount = elapsedTime.toMicroseconds();
+  of << "\n\nTime: " << elapsedTimeCount / 1000000U << "."
+     << (elapsedTimeCount % 1000000U) / 100000U << " (s)\n\n";
+  of << "States: " << executor.states.size() << "\n";
+  of << "Memory: " << util::GetTotalMallocUsage() << "\n";
+  of << "All BB: " << visitedBasicBlocks.size() << "\n";
+  of << "Added BB: " << addedVisitedBasicBlocks.size() << "\n";
+  of << "All BB in Defined: " << visitedDefinedBasicBlocks.size() << "\n";
+  of << "Add BB in Defined: " << addedVisitedDefinedBasicBlocks.size() << "\n";
+  of << "All Lines: " << visitedLines.size() << "\n";
+  of << "Added Lines: " << addedVisitedLines.size() << "\n";
+  of << "All Lines in Defined: " << visitedDefinedLines.size() << "\n";
+  of << "Added Lines in Defined: " << addedVisitedDefinedLines.size() << "\n";
+  of << "-------- Added Basic Blocks --------\n";
+  for (const auto &addedBlockPair : addedVisitedBasicBlocks) {
+    of << addedBlockPair.second.first << "():" << addedBlockPair.second.second
+       << "\n";
+  }
+  of << "-------- Added Basic Blocks in Defined Functions --------\n";
+  for (const auto &addedBlockPair : addedVisitedDefinedBasicBlocks) {
+    of << addedBlockPair.second.first << "():" << addedBlockPair.second.second
+       << "\n";
+  }
+  of << "-------- Added Lines --------\n";
+  for (const auto &addedLine : addedVisitedLines) {
+    of << addedLine << "\n";
+  }
+  of << "-------- Added Lines in Defined Functions --------\n";
+  for (const auto &addedLine : addedVisitedDefinedLines) {
+    of << addedLine << "\n";
+  }
+  addedVisitedBasicBlocks.clear();
+  addedVisitedDefinedBasicBlocks.clear();
+  addedVisitedLines.clear();
+  addedVisitedDefinedLines.clear();
+
+  of.flush();
 }
 
 void StatsTracker::updateStateStatistics(uint64_t addend) {

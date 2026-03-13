@@ -111,6 +111,8 @@ public:
   setModule(std::vector<std::unique_ptr<llvm::Module>> &modules,
             const ModuleOptions &opts) = 0;
 
+  virtual void setSearcherPreModuleInfo(const llvm::Module *mainModule) = 0;
+
   // supply a tree stream writer which the interpreter will use
   // to record the concrete path (as a stream of '0' and '1' bytes).
   virtual void setPathWriter(TreeStreamWriter *tsw) = 0;

@@ -1376,6 +1376,7 @@ int main(int argc, char **argv, char **envp) {
     theInterpreter = Interpreter::create(ctx, IOpts, handler);
   assert(interpreter);
   handler->setInterpreter(interpreter);
+  interpreter->setSearcherPreModuleInfo(mainModule);
 
   for (int i=0; i<argc; i++) {
     handler->getInfoStream() << argv[i] << (i+1<argc ? " ":"\n");

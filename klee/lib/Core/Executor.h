@@ -105,6 +105,8 @@ class Executor : public Interpreter {
 public:
   typedef std::pair<ExecutionState*,ExecutionState*> StatePair;
 
+  std::unordered_map<std::string, bool> definedFunctions;
+
   /// The random number generator.
   RNG theRNG;
 
@@ -607,6 +609,8 @@ public:
   void setInhibitForking(bool value) override { inhibitForking = value; }
 
   void prepareForEarlyExit() override;
+
+  void setSearcherPreModuleInfo(const llvm::Module *mainModule) override;
 
   /*** State accessor methods ***/
 

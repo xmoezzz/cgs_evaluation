@@ -17,7 +17,11 @@
 #include <set>
 #include <sqlite3.h>
 
+#include <unordered_map>
+#include <unordered_set>
+
 namespace llvm {
+  class BasicBlock;
   class StoreInst;
   class Function;
   class Instruction;
@@ -38,6 +42,24 @@ namespace klee {
 
     Executor &executor;
     std::string objectFilename;
+
+    std::unique_ptr<llvm::raw_fd_ostream> bcStatsFile;
+
+    std::unordered_map<const llvm::BasicBlock *, std::pair<std::string, std::size_t>>
+        visitedBasicBlocks;
+    std::unordered_map<const llvm::BasicBlock *, std::pair<std::string, std::size_t>>
+        addedVisitedBasicBlocks;
+
+    std::unordered_set<std::string> visitedLines;
+    std::unordered_set<std::string> addedVisitedLines;
+
+    std::unordered_map<const llvm::BasicBlock *, std::pair<std::string, std::size_t>>
+        visitedDefinedBasicBlocks;
+    std::unordered_map<const llvm::BasicBlock *, std::pair<std::string, std::size_t>>
+        addedVisitedDefinedBasicBlocks;
+
+    std::unordered_set<std::string> visitedDefinedLines;
+    std::unordered_set<std::string> addedVisitedDefinedLines;
 
     std::unique_ptr<llvm::raw_fd_ostream> istatsFile;
     ::sqlite3 *statsFile = nullptr;
@@ -64,6 +86,7 @@ namespace klee {
     void writeStatsHeader();
     void writeStatsLine();
     void writeIStats();
+    void writeBCStats();
 
   public:
     StatsTracker(Executor &_executor, std::string _objectFilename,
